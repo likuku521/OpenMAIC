@@ -98,3 +98,4 @@ auto-update.log
 dev-server.log
 .last-update-sha
 pnpm-install.log
+.github/workflows/
