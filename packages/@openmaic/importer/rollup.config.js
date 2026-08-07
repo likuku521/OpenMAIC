@@ -14,7 +14,7 @@ const plugins = [
   commonjs(),
   json(),
   typescript({ tsconfig: './tsconfig.json' }),
-  terser(),,,
+  terser(),
 ];
 
 const createConfig = (output) => ({
