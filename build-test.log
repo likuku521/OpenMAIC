@@ -1,0 +1,104 @@
+
+> openmaic@0.3.1 build C:\Users\28215\OpenMAIC
+> node scripts/assert-vendor-maic-importer.mjs && next build
+
+[assert-vendor] ok: public\vendor\maic-importer\index.js
+▲ Next.js 16.1.2 (Turbopack)
+- Environments: .env.local
+- Experiments (use with caution):
+  · proxyClientMaxBodySize: "200mb"
+
+⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
+  Creating an optimized production build ...
+✓ Compiled successfully in 48s
+  Running TypeScript ...
+  Collecting page data using 15 workers ...
+  Generating static pages using 15 workers (0/43) ...
+  Generating static pages using 15 workers (10/43) 
+  Generating static pages using 15 workers (21/43) 
+  Generating static pages using 15 workers (32/43) 
+✓ Generating static pages using 15 workers (43/43) in 1810.8ms
+  Finalizing page optimization ...
+⚠ Failed to copy traced files for C:\Users\28215\OpenMAIC\.next\server\app\_not-found\page.js Error: EINVAL: invalid argument, copyfile 'C:\Users\28215\OpenMAIC\.next\server\chunks\ssr\[externals]_node:async_hooks_b485b2a4._.js' -> 'C:\Users\28215\OpenMAIC\.next\standalone\.next\server\chunks\ssr\[externals]_node:async_hooks_b485b2a4._.js'
+    at ignore-listed frames {
+  errno: -4071,
+  code: 'EINVAL',
+  syscall: 'copyfile',
+  path: 'C:\\Users\\28215\\OpenMAIC\\.next\\server\\chunks\\ssr\\[externals]_node:async_hooks_b485b2a4._.js',
+  dest: 'C:\\Users\\28215\\OpenMAIC\\.next\\standalone\\.next\\server\\chunks\\ssr\\[externals]_node:async_hooks_b485b2a4._.js'
+}
+⚠ Failed to copy traced files for C:\Users\28215\OpenMAIC\.next\server\app\api\agent\edit\route.js Error: EINVAL: invalid argument, copyfile 'C:\Users\28215\OpenMAIC\.next\server\chunks\[externals]_node:http_c3a9e25f._.js' -> 'C:\Users\28215\OpenMAIC\.next\standalone\.next\server\chunks\[externals]_node:http_c3a9e25f._.js'
+    at ignore-listed frames {
+  errno: -4071,
+  code: 'EINVAL',
+  syscall: 'copyfile',
+  path: 'C:\\Users\\28215\\OpenMAIC\\.next\\server\\chunks\\[externals]_node:http_c3a9e25f._.js',
+  dest: 'C:\\Users\\28215\\OpenMAIC\\.next\\standalone\\.next\\server\\chunks\\[externals]_node:http_c3a9e25f._.js'
+}
+⚠ Failed to copy traced files for C:\Users\28215\OpenMAIC\.next\server\app\api\extract-document\route.js Error: EINVAL: invalid argument, copyfile 'C:\Users\28215\OpenMAIC\.next\server\chunks\[externals]_node:async_hooks_b485b2a4._.js' -> 'C:\Users\28215\OpenMAIC\.next\standalone\.next\server\chunks\[externals]_node:async_hooks_b485b2a4._.js'
+    at ignore-listed frames {
+  errno: -4071,
+  code: 'EINVAL',
+  syscall: 'copyfile',
+  path: 'C:\\Users\\28215\\OpenMAIC\\.next\\server\\chunks\\[externals]_node:async_hooks_b485b2a4._.js',
+  dest: 'C:\\Users\\28215\\OpenMAIC\\.next\\standalone\\.next\\server\\chunks\\[externals]_node:async_hooks_b485b2a4._.js'
+}
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ƒ /api/access-code/status
+├ ƒ /api/access-code/verify
+├ ƒ /api/agent/edit
+├ ƒ /api/azure-voices
+├ ƒ /api/chat
+├ ƒ /api/chat/pi
+├ ƒ /api/classroom
+├ ƒ /api/classroom-media/[classroomId]/[...path]
+├ ƒ /api/comfyui-workflows
+├ ƒ /api/export-video/capability
+├ ƒ /api/export-video/render
+├ ƒ /api/export-video/render/[jobId]
+├ ƒ /api/export-video/render/[jobId]/download
+├ ƒ /api/extract-document
+├ ƒ /api/generate-classroom
+├ ƒ /api/generate-classroom/[jobId]
+├ ƒ /api/generate/agent-profiles
+├ ƒ /api/generate/image
+├ ƒ /api/generate/scene-actions
+├ ƒ /api/generate/scene-content
+├ ƒ /api/generate/scene-outlines-stream
+├ ƒ /api/generate/tts
+├ ƒ /api/generate/video
+├ ƒ /api/generate/voice
+├ ƒ /api/health
+├ ƒ /api/parse-pdf
+├ ƒ /api/pbl/v2/evaluate
+├ ƒ /api/pbl/v2/instructor
+├ ƒ /api/pbl/v2/open-task
+├ ƒ /api/pbl/v2/simulator
+├ ƒ /api/pbl/v2/task/update
+├ ƒ /api/persistence/[...path]
+├ ƒ /api/provider/probe-models
+├ ƒ /api/proxy-media
+├ ƒ /api/quiz-grade
+├ ƒ /api/server-providers
+├ ƒ /api/transcription
+├ ƒ /api/usage
+├ ƒ /api/verify-image-provider
+├ ƒ /api/verify-model
+├ ƒ /api/verify-pdf-provider
+├ ƒ /api/verify-video-provider
+├ ƒ /api/web-search
+├ ○ /apple-icon.png
+├ ƒ /classroom/[id]
+├ ○ /eval/whiteboard
+└ ƒ /generation-preview
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+BUILD_EXIT:0
