@@ -94,6 +94,11 @@ export async function register(): Promise<void> {
     return shutdownPromise;
   };
 
-  process.once('SIGTERM', () => void shutdown());
-  process.once('SIGINT', () => void shutdown());
+  // Edge bundle bug: Next.js 16 Turbopack static-analyses the whole module
+  // and rejects `process.once` even though the NEXT_RUNTIME guard above
+  // would skip it. Hide the signal hook behind a dynamic import that lives
+  // in a Node-only file so the Edge bundle never resolves it.
+  await import('./instrumentation-signals-node').then((m) =>
+    m.installShutdownSignals(shutdown)
+  );
 }
