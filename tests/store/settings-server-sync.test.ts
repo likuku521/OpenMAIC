@@ -206,11 +206,11 @@ async function readPersistedState(): Promise<Record<string, unknown>> {
 interface MockServerResponse {
   providers?: Record<string, { models?: string[]; baseUrl?: string }>;
   tts?: Record<string, { baseUrl?: string; disabled?: boolean }>;
-  asr?: Record<string, { baseUrl?: string }>;
+  asr?: Record<string, { baseUrl?: string; disabled?: boolean }>;
   pdf?: Record<string, { baseUrl?: string }>;
-  image?: Record<string, { baseUrl?: string }>;
-  video?: Record<string, { baseUrl?: string }>;
-  webSearch?: Record<string, { baseUrl?: string }>;
+  image?: Record<string, { models?: string[]; baseUrl?: string; disabled?: boolean }>;
+  video?: Record<string, { models?: string[]; baseUrl?: string; disabled?: boolean }>;
+  webSearch?: Record<string, { baseUrl?: string; disabled?: boolean }>;
 }
 
 function mockServerResponse(overrides: MockServerResponse = {}) {
@@ -820,6 +820,20 @@ describe('fetchServerProviders — ASR stale selection', () => {
 
     expect(store.getState().asrProviderId).toBe('openai-whisper');
   });
+
+  it('marks a force-disabled ASR provider and re-points the stale selection', async () => {
+    const store = await getStore();
+    store.setState({ asrProviderId: 'openai-whisper' });
+    mockServerResponse({ asr: { 'openai-whisper': { disabled: true } } });
+
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().asrProvidersConfig['openai-whisper']).toMatchObject({
+      isServerConfigured: false,
+      serverDisabled: true,
+    });
+    expect(store.getState().asrProviderId).toBe('browser-native');
+  });
 });
 
 describe('fetchServerProviders — Web Search provider sync', () => {
@@ -893,6 +907,22 @@ describe('fetchServerProviders — Web Search provider sync', () => {
     });
     await store.getState().fetchServerProviders();
 
+    expect(store.getState().webSearchProviderId).toBe('bocha');
+  });
+
+  it('marks a force-disabled web-search provider and re-points the stale selection', async () => {
+    const store = await getStore();
+    store.setState({ webSearchProviderId: 'tavily' });
+    mockServerResponse({
+      webSearch: { tavily: { disabled: true }, bocha: {} },
+    });
+
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().webSearchProvidersConfig.tavily).toMatchObject({
+      isServerConfigured: false,
+      serverDisabled: true,
+    });
     expect(store.getState().webSearchProviderId).toBe('bocha');
   });
 
@@ -1042,6 +1072,20 @@ describe('fetchServerProviders — Image stale selection', () => {
     expect(store.getState().imageModelId).toBe('qwen-image-max');
   });
 
+  it('marks a force-disabled image provider and re-points the stale selection', async () => {
+    const store = await getStore();
+    store.setState({ imageProviderId: 'seedream' });
+    mockServerResponse({ image: { seedream: { disabled: true }, 'qwen-image': {} } });
+
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().imageProvidersConfig.seedream).toMatchObject({
+      isServerConfigured: false,
+      serverDisabled: true,
+    });
+    expect(store.getState().imageProviderId).toBe('qwen-image');
+  });
+
   it('auto-selects provider and model when server adds image provider after empty state', async () => {
     const store = await getStore();
 
@@ -1166,6 +1210,20 @@ describe('fetchServerProviders — Video stale selection', () => {
 
     expect(store.getState().videoProviderId).toBe('kling');
     expect(store.getState().videoModelId).toBe('kling-v2-6');
+  });
+
+  it('marks a force-disabled video provider and re-points the stale selection', async () => {
+    const store = await getStore();
+    store.setState({ videoProviderId: 'seedance' });
+    mockServerResponse({ video: { seedance: { disabled: true }, kling: {} } });
+
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().videoProvidersConfig.seedance).toMatchObject({
+      isServerConfigured: false,
+      serverDisabled: true,
+    });
+    expect(store.getState().videoProviderId).toBe('kling');
   });
 
   it('auto-selects provider and model when server adds video provider after empty state', async () => {
@@ -1769,5 +1827,49 @@ describe('TTS provider enablement (#665)', () => {
     mockServerResponse({ tts: {} });
     await store.getState().fetchServerProviders();
     expect(store.getState().ttsProvidersConfig['openai-tts'].serverDisabled).toBe(false);
+  });
+
+  it('applies server-pinned image models as customModels with replaceBuiltInModels', async () => {
+    const store = await getStore();
+    mockServerResponse({
+      image: { seedream: { models: ['doubao-seedream-5.0-lite'] } },
+    });
+    await store.getState().fetchServerProviders();
+
+    const config = store.getState().imageProvidersConfig.seedream;
+    expect(config.isServerConfigured).toBe(true);
+    expect(config.customModels).toEqual([
+      { id: 'doubao-seedream-5.0-lite', name: 'doubao-seedream-5.0-lite' },
+    ]);
+    expect(config.replaceBuiltInModels).toBe(true);
+  });
+
+  it('applies server-pinned video models as customModels with replaceBuiltInModels', async () => {
+    const store = await getStore();
+    mockServerResponse({
+      video: { seedance: { models: ['doubao-seedance-2-0', 'doubao-seedance-3-0'] } },
+    });
+    await store.getState().fetchServerProviders();
+
+    const config = store.getState().videoProvidersConfig.seedance;
+    expect(config.isServerConfigured).toBe(true);
+    expect(config.customModels).toEqual([
+      { id: 'doubao-seedance-2-0', name: 'doubao-seedance-2-0' },
+      { id: 'doubao-seedance-3-0', name: 'doubao-seedance-3-0' },
+    ]);
+    expect(config.replaceBuiltInModels).toBe(true);
+  });
+
+  it('does not set customModels when server reports no models for image provider', async () => {
+    const store = await getStore();
+    mockServerResponse({
+      image: { seedream: {} },
+    });
+    await store.getState().fetchServerProviders();
+
+    const config = store.getState().imageProvidersConfig.seedream;
+    expect(config.isServerConfigured).toBe(true);
+    expect(config.customModels).toBeUndefined();
+    expect(config.replaceBuiltInModels).toBeUndefined();
   });
 });

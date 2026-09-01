@@ -10,6 +10,7 @@ import { callLLM } from '@/lib/ai/llm';
 import { formatSearchResultsAsContext, searchWeb } from '@/lib/web-search';
 import {
   isServerConfiguredProvider,
+  isServerProviderDisabled,
   resolveServerWebSearchProviderId,
   resolveWebSearchApiKey,
   resolveWebSearchModel,
@@ -21,7 +22,7 @@ import {
   SEARCH_QUERY_REWRITE_EXCERPT_LENGTH,
 } from '@/lib/server/search-query-builder';
 import { resolveModelFromRequest } from '@/lib/server/resolve-model';
-import type { AICallFn } from '@/lib/generation/pipeline-types';
+import type { AICallFn } from '@openmaic/generation';
 import { WEB_SEARCH_PROVIDERS } from '@/lib/web-search/constants';
 import type { BaiduSubSources, WebSearchProviderId } from '@/lib/web-search/types';
 import { resolveWebSearchRouteBaseUrl } from '@/lib/server/web-search-config';
@@ -73,6 +74,18 @@ export async function POST(req: NextRequest) {
         `Using server-configured web search provider "${serverProviderId}" instead of "${providerId}"`,
       );
       providerId = serverProviderId;
+    }
+
+    // Enforce server precedence: a force-disabled provider is off for everyone,
+    // regardless of any client key/selection — mirror the TTS contract (#665).
+    // Checked after the server-preference override so a disabled client choice
+    // yields to the operator's enabled backend.
+    if (isServerProviderDisabled('webSearch', providerId)) {
+      return apiError(
+        'PROVIDER_DISABLED',
+        403,
+        'This web search provider is disabled by the server',
+      );
     }
 
     const provider = WEB_SEARCH_PROVIDERS[providerId];
@@ -192,6 +205,8 @@ function getWebSearchEnvKey(providerId: WebSearchProviderId): string {
       return 'WEB_SEARCH_CLAUDE_API_KEY';
     case 'minimax':
       return 'WEB_SEARCH_MINIMAX_API_KEY';
+    case 'doubao':
+      return 'WEB_SEARCH_DOUBAO_API_KEY';
     case 'searxng':
       return 'SEARXNG_BASE_URL';
     case 'tavily':

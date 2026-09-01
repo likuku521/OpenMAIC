@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable, type Table } from 'dexie';
-import { DSL_VERSION } from '@openmaic/dsl';
+import { migrate } from '@openmaic/dsl';
 import type {
   Scene,
   SceneType,
@@ -20,7 +20,6 @@ import type {
 import type { SceneOutline } from '@/lib/types/generation';
 import type { VoiceDesign } from '@/lib/audio/voice-design';
 import type { UIMessage } from 'ai';
-import type { AgentEditSessionRecord } from '@/lib/agent/client/agent-edit-session-types';
 import { createLogger } from '@/lib/logger';
 import { beginStageRuntimeDeletionSafely, getRuntimeStore } from '@/lib/runtime/store';
 import type { RuntimeStore } from '@openmaic/storage';
@@ -77,6 +76,36 @@ export interface StageRecord {
 }
 
 /**
+ * Folder table - User-created folders for grouping courses.
+ *
+ * Folder membership is device-local organization metadata, not part of the
+ * course document itself (which is owned by the `@openmaic/storage`
+ * DocumentStore in a separate database). It lives in this Dexie database
+ * alongside the legacy tables. See {@link StageFolderMembership}.
+ */
+export interface FolderRecord {
+  id: string; // Primary key
+  name: string;
+  order: number; // Sort order
+  createdAt: number; // timestamp
+  updatedAt: number; // timestamp
+}
+
+/**
+ * Stage→folder membership mapping. `stageId` is the primary key so each course
+ * has at most one row; a missing row (or `folderId === undefined`) means the
+ * course is unfiled. This is intentionally separate from both the legacy
+ * `stages` table (a migration mirror that nothing writes) and the
+ * DocumentStore stage row (version-independent document content), so folder
+ * grouping never touches document semantics.
+ */
+export interface StageFolderMembership {
+  stageId: string; // Primary key (FK -> DocumentStore stage id)
+  folderId?: string; // FK -> folders.id; undefined = unfiled
+  updatedAt: number; // timestamp
+}
+
+/**
  * Scene table - Scene/page data
  */
 export interface SceneRecord {
@@ -99,6 +128,13 @@ export interface AudioFileRecord {
   id: string; // Primary key (audioId)
   /** Stage ownership index. Absent on legacy rows; document walking remains their fallback. */
   stageId?: string;
+  /**
+   * The legacy derived id a compatibility mirror was written for. IndexedDB
+   * needs no schema bump for a non-indexed field; retry recovery reads it.
+   */
+  originAudioId?: string;
+  /** The legacy URL a compatibility mirror was fetched from, for retry recovery. */
+  originAudioUrl?: string;
   blob: Blob; // Audio binary data
   duration?: number; // Duration (seconds)
   format: string; // mp3, wav, etc.
@@ -137,6 +173,18 @@ export interface ChatSessionRecord {
   updatedAt: number;
   sceneId?: string;
   lastActionIndex?: number;
+}
+
+/** Compatibility-only shape for the retired editor right-rail table. The
+ * table remains in the Dexie schema so deleting a course can clean up rows
+ * created by older clients; no runtime writes or reads it anymore. */
+interface LegacyAgentEditSessionRecord {
+  id: string;
+  stageId: string;
+  title: string;
+  messages: unknown[];
+  createdAt: number;
+  updatedAt: number;
 }
 
 /**
@@ -249,7 +297,7 @@ export function mediaFileKey(stageId: string, elementId: string): string {
 // ==================== Database Definition ====================
 
 const DATABASE_NAME = 'MAIC-Database';
-const _DATABASE_VERSION = 16;
+const _DATABASE_VERSION = 17;
 
 /**
  * MAIC Database Instance
@@ -269,7 +317,9 @@ class MAICDatabase extends Dexie {
   generatedAgents!: EntityTable<GeneratedAgentRecord, 'id'>;
   voiceProfiles!: EntityTable<VoiceProfileRecord, 'id'>;
   autoVoiceCache!: EntityTable<AutoVoiceCacheRecord, 'voiceId'>;
-  agentEditSessions!: EntityTable<AgentEditSessionRecord, 'id'>;
+  agentEditSessions!: EntityTable<LegacyAgentEditSessionRecord, 'id'>;
+  folders!: EntityTable<FolderRecord, 'id'>;
+  stageFolders!: EntityTable<StageFolderMembership, 'stageId'>;
 
   constructor() {
     super(DATABASE_NAME);
@@ -502,6 +552,17 @@ class MAICDatabase extends Dexie {
     this.version(16).stores({
       audioFiles: 'id, stageId, createdAt',
     });
+
+    // Version 17: Course folders — group courses into user-created folders.
+    // `folders` holds folder metadata; `stageFolders` maps each course (by
+    // DocumentStore stage id) to its folder. Neither touches the document
+    // aggregate: folder grouping is device-local organization metadata kept in
+    // this Dexie database alongside the legacy tables, so an existing course
+    // with no membership row is simply unfiled (no upgrade callback needed).
+    this.version(17).stores({
+      folders: 'id, order',
+      stageFolders: 'stageId, folderId',
+    });
   }
 }
 
@@ -617,11 +678,15 @@ export async function exportDatabase(chatOptions: ChatStorageOptions = {}): Prom
           const snapshot = await getLegacyDocumentStore().read(stage.id);
           if (!snapshot) return null;
           const { stage: canonicalStage } = canonicalizeLegacyStage(snapshot.stage);
-          const document: AppDocument = {
+          // Leave the document unstamped and let the ladder stamp it: the
+          // stamp must be earned by actually running the migrations. A
+          // hand-assigned DSL_VERSION on a payload the ladder never walked
+          // reads as current on restore and permanently skips real payload
+          // transforms (the 0.3.0 legacy-line strip was the first).
+          const document: AppDocument = migrate({
             stage: canonicalStage,
             scenes: snapshot.scenes.map(canonicalizeLegacyScene).sort((a, b) => a.order - b.order),
-            dslVersion: DSL_VERSION,
-          };
+          }) as AppDocument;
           if (snapshot.outline) document.outline = canonicalizeLegacyOutline(snapshot.outline);
           return document;
         }),
@@ -720,11 +785,19 @@ export async function importDatabase(
       // Record the pre-import deletion state alongside the document pre-image:
       // a failed import rolls the document back, so it must roll this back too.
       const wasDeleted = isStageDeleted(document.stage.id);
-      await mutateDocument(document.stage.id, async (_existing, store) => {
-        const preImage = (await store.loadDocument(document.stage.id)) as AppDocument | null;
-        await store.saveDocument(document);
-        importedDocuments.push({ id: document.stage.id, preImage, wasDeleted });
-      });
+      // Wholesale replacement: the restored aggregate overwrites the whole
+      // document, so eager conversion of whatever currently sits there would
+      // allocate assets for content the restore immediately replaces.
+      await mutateDocument(
+        document.stage.id,
+        async (_existing, store) => {
+          const preImage = (await store.loadDocument(document.stage.id)) as AppDocument | null;
+          await store.saveDocument(document);
+          importedDocuments.push({ id: document.stage.id, preImage, wasDeleted });
+        },
+        {},
+        { mode: 'replace' },
+      );
       // Explicit document (re)creation: a backup may restore a stage deleted
       // earlier this session under the same id. Lift the deleted flag so later
       // edits of the restored document persist instead of being dropped. (The

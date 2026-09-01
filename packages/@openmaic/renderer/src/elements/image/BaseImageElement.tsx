@@ -58,6 +58,12 @@ export function BaseImageElement({ elementInfo, renderImage }: BaseImageElementP
         src={src}
         draggable={false}
         data-soft-edge={softEdge || undefined}
+        // Lazy + async decode: thumbnail surfaces (sidebar, nav rail, course
+        // cards) mount far more images than the viewport needs. In-viewport
+        // images are unaffected — the browser fetches them immediately.
+        // slideToPng forces these back to eager in its off-screen tree.
+        loading="lazy"
+        decoding="async"
         style={{
           position: 'absolute',
           top: imgPosition.top,
@@ -86,7 +92,7 @@ export function BaseImageElement({ elementInfo, renderImage }: BaseImageElementP
 
   return (
     <div
-      className="element-content"
+      className="base-element-image element-content"
       style={{
         position: 'absolute',
         top: `${elementInfo.top}px`,

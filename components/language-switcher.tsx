@@ -32,11 +32,7 @@ export function LanguageSwitcher({ onOpen }: LanguageSwitcherProps) {
       }}
     >
       <DropdownMenuTrigger asChild>
-        <button
-          suppressHydrationWarning
-          translate="no"
-          className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all"
-        >
+        <button className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all">
           {supportedLocales.find((l) => l.code === locale)?.shortLabel ?? locale}
         </button>
       </DropdownMenuTrigger>

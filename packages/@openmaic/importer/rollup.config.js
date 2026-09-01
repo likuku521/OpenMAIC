@@ -3,6 +3,8 @@ import commonjs from '@rollup/plugin-commonjs';
 import typescript from '@rollup/plugin-typescript';
 import terser from '@rollup/plugin-terser';
 import json from '@rollup/plugin-json';
+// rollup-plugin-node-globals / node-builtins removed on Windows
+// (shims Emscripten JPEG-XR output as `/Users\...` octal escape → "Octal literal in strict mode")
 
 const onwarn = (warning) => {
   if (warning.code === 'CIRCULAR_DEPENDENCY') return;

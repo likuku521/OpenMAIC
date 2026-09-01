@@ -34,5 +34,7 @@ export {
   type PercentageGeometry,
 } from './utils/geometry';
 export { cn } from './utils/cn';
+export { getElementRange, getLineElementPath, getTableSubThemeColor } from './utils/element';
+export { createTextProseStyles } from './styles';
 
 export * from './types';

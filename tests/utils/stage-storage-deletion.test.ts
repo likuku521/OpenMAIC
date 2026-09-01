@@ -50,6 +50,7 @@ const {
       }),
     },
     stageOutlines: { delete: vi.fn().mockResolvedValue(undefined) },
+    stageFolders: { delete: vi.fn().mockResolvedValue(undefined) },
     playbackState: { delete: vi.fn().mockResolvedValue(undefined) },
     mediaFiles: {
       where: (field: string) => ({
@@ -583,7 +584,7 @@ describe('deleteStageData wiring', () => {
     expect(dbMock.generatedAgents._delete).toHaveBeenCalledOnce();
   });
 
-  it('reclaims every allocated document and compatibility-row ref before deleting rows', async () => {
+  it('deletes stage compatibility rows without touching registry entries', async () => {
     const document = {
       stage: {
         id: stageId,
@@ -647,12 +648,9 @@ describe('deleteStageData wiring', () => {
 
     await deleteStageData(stageId);
 
-    expect(new Set(poolRemove.mock.calls.map(([ref]) => ref))).toEqual(
-      new Set(['ast_image', 'ast_video', 'ast_poster', 'ast_audio', 'ast_media_row']),
-    );
-    expect(poolRemove).toHaveBeenCalledTimes(5);
+    expect(poolRemove).not.toHaveBeenCalled();
     expect(fakeStore.deleteDocument.mock.invocationCallOrder[0]).toBeLessThan(
-      poolRemove.mock.invocationCallOrder[0],
+      dbMock.mediaFiles._bulkDelete.mock.invocationCallOrder[0]!,
     );
     expect(dbMock.mediaFiles._bulkDelete).toHaveBeenCalledExactlyOnceWith(
       ['ast_image', 'ast_video', 'ast_poster', 'ast_media_row'].map((ref) => `${stageId}:${ref}`),

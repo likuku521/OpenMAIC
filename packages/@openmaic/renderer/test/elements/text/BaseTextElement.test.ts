@@ -18,6 +18,38 @@ const textElement: PPTTextElement = {
 };
 
 describe('BaseTextElement', () => {
+  it('preserves literal line endings in static text content', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(BaseTextElement, {
+        elementInfo: { ...textElement, content: 'First line\nSecond line' },
+      }),
+    );
+
+    expect(markup).toContain('white-space:pre-line');
+  });
+
+  it('does not preserve source-formatting line endings in rich HTML content', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(BaseTextElement, {
+        elementInfo: { ...textElement, content: '<p>First line</p>\n<p>Second line</p>' },
+      }),
+    );
+
+    expect(markup).not.toContain('white-space:pre-line');
+  });
+
+  it('does not apply literal-line-ending styling to injected editable content', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(BaseTextElement, {
+        elementInfo: textElement,
+        renderContent: () => React.createElement('div', { 'data-text-editor': '' }),
+      }),
+    );
+
+    expect(markup).toContain('data-text-editor=""');
+    expect(markup).not.toContain('white-space:pre-line');
+  });
+
   it('top-aligns text when vAlign is omitted', () => {
     const markup = renderToStaticMarkup(
       React.createElement(BaseTextElement, { elementInfo: textElement }),
@@ -38,5 +70,29 @@ describe('BaseTextElement', () => {
     );
 
     expect(markup).toContain(`justify-content:${justifyContent}`);
+  });
+
+  it('shares text paint styles with custom editable content', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(BaseTextElement, {
+        elementInfo: {
+          ...textElement,
+          fill: '#ffeeaa',
+          opacity: 0.8,
+          lineHeight: 1.8,
+          paragraphSpace: 6,
+          wordSpace: 3,
+          vertical: true,
+        },
+        renderContent: () => React.createElement('div', { 'data-renderer-text-editor': '' }),
+      }),
+    );
+
+    expect(markup).toContain('background-color:#ffeeaa');
+    expect(markup).toContain('line-height:1.8');
+    expect(markup).toContain('letter-spacing:3px');
+    expect(markup).toContain('writing-mode:vertical-rl');
+    expect(markup).toContain('data-renderer-text-editor=""');
+    expect(markup).not.toContain('ProseMirror-static');
   });
 });
