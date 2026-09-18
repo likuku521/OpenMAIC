@@ -322,15 +322,17 @@ function applyExtLstImageEffectsToFilters(
 async function resolveMediaUrl(
   rId: string | undefined,
   ctx: RenderContext,
+  embeddedOnly = false,
 ): Promise<string | undefined> {
   if (!rId) return undefined;
 
   const rel = ctx.slide.rels.get(rId);
   if (!rel) return undefined;
+  if (embeddedOnly && rel.targetMode === 'External') return undefined;
 
   // Check if target is an external URL
   if (rel.target.startsWith('http://') || rel.target.startsWith('https://')) {
-    return rel.target;
+    return embeddedOnly ? undefined : rel.target;
   }
 
   // Resolve from embedded media
@@ -339,6 +341,17 @@ async function resolveMediaUrl(
   if (!data) return undefined;
 
   return resolveMediaToUrl(mediaPath, data, 'blob', ctx.mediaUrlCache);
+}
+
+async function resolvePictureMediaUrl(
+  node: PicNodeData,
+  ctx: RenderContext,
+): Promise<string | undefined> {
+  // A legacy link can exist but point at NULL or a missing file. Only choose
+  // the embedded reference after resolving actual bytes; otherwise try the link.
+  return (
+    (await resolveMediaUrl(node.embeddedMediaRId, ctx, true)) ?? resolveMediaUrl(node.mediaRId, ctx)
+  );
 }
 
 /**
@@ -350,8 +363,7 @@ async function renderVideo(
   order: number,
   box: { left: number; top: number; width: number; height: number },
 ): Promise<Video> {
-  // Try to get video URL from mediaRId
-  const videoUrl = await resolveMediaUrl(node.mediaRId, ctx);
+  const videoUrl = await resolvePictureMediaUrl(node, ctx);
 
   // Also try to show poster image from blipEmbed
   let posterUrl: string | undefined;
@@ -367,7 +379,7 @@ async function renderVideo(
   }
 
   const blob = videoUrl || undefined;
-  const src = posterUrl ?? videoUrl ?? undefined;
+  const src = posterUrl;
 
   return {
     type: 'video',
@@ -387,7 +399,7 @@ async function renderAudio(
   order: number,
   box: { left: number; top: number; width: number; height: number },
 ): Promise<Audio> {
-  const audioUrl = await resolveMediaUrl(node.mediaRId, ctx);
+  const audioUrl = await resolvePictureMediaUrl(node, ctx);
   const blob = audioUrl || '';
   // TODO: optional cover image from blipEmbed
 
@@ -418,12 +430,32 @@ function bytesToDataUrl(bytes: Uint8Array, mediaPath: string): string {
   return toDataUrl(base64, getMimeType(mediaPath));
 }
 
+/**
+ * Load a data-URL image, resolving to `null` when it can't be decoded.
+ * Server-side DOM shims (linkedom) never fire `load`/`error`, which would hang the import,
+ * so prefer `decode()` and fall back to a timeout when absent.
+ */
 function loadImageElement(dataUrl: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     const img = document.createElement('img');
-    img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
+    let settled = false;
+    const finish = (value: HTMLImageElement | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    img.onload = () => finish(img);
+    img.onerror = () => finish(null);
     img.src = dataUrl;
+    if (typeof img.decode === 'function') {
+      img
+        .decode()
+        .then(() => finish(img))
+        .catch(() => finish(null));
+    } else {
+      // No decode(): give load/error a short window, then resolve null (shims fire neither).
+      setTimeout(() => finish(null), 250);
+    }
   });
 }
 
@@ -638,6 +670,15 @@ export async function pictureToElement(
 
   if (node.isAudio) {
     return renderAudio(node, ctx, order, box);
+  }
+
+  // p14:media is shared by audio and video. When legacy markers are absent,
+  // infer the kind from the embedded target rather than treating all media as video.
+  const embeddedRel = node.embeddedMediaRId && ctx.slide.rels.get(node.embeddedMediaRId);
+  if (embeddedRel) {
+    const mime = getMimeType(embeddedRel.target);
+    if (mime.startsWith('video/')) return renderVideo(node, ctx, order, box);
+    if (mime.startsWith('audio/')) return renderAudio(node, ctx, order, box);
   }
 
   return renderImage(node, ctx, order, box);

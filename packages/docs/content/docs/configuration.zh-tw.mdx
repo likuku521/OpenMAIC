@@ -164,11 +164,14 @@ AliDocMind 的文件解析支援 PDF、DOCX、PPTX、XLSX，以及 PNG、JPG/JPE
 
 ## 聯網搜尋
 
-設定 Tavily、Bocha、Brave、Baidu、SearXNG 或 MiniMax：
+設定 Tavily、Exa、Bocha、Brave、Baidu、SearXNG 或 MiniMax：
 
 ```bash
 TAVILY_API_KEY=
 TAVILY_BASE_URL=           # 選填覆寫值
+
+EXA_API_KEY=
+EXA_BASE_URL=https://api.exa.ai  # 選填覆寫值
 
 BOCHA_API_KEY=
 BOCHA_BASE_URL=            # 選填覆寫值
@@ -193,7 +196,7 @@ Brave 和 SearXNG 不需要 API key；前端可以在每次生成時選擇是否
 ACCESS_CODE=your-secret-code
 ```
 
-訪客只會看到一次提示，密碼會儲存在 HTTP-only cookie 中。留空即可關閉此功能。
+請使用足夠長的隨機值（至少 16 個字元），因為該密碼是保護部署的唯一金鑰。驗證通過後會在 HTTP-only cookie 中儲存一個簽名權杖，有效期 7 天，由伺服器端強制檢查，過期後需要重新驗證。只有在受信任的反向代理後設定 `TRUST_PROXY_HEADERS=true`（由代理覆寫 `x-forwarded-for` / `x-real-ip`）時才會限制驗證速率：依用戶端限制（每個用戶端 60 秒內 10 次），驗證成功會清除該用戶端的計數；沒有可信代理時應用程式無法將請求歸因到特定用戶端，因此完全不限流，保護取決於密碼的長度與隨機性。留空即可關閉此功能。
 
 ## 預設模型和模型路由
 
@@ -215,6 +218,9 @@ NEXT_PUBLIC_MAIC_EDITOR_ENABLED=true
 
 # Pi 對話執行時
 NEXT_PUBLIC_PI_CHAT_ENABLED=true
+
+# Pi 播放態中的 PPT 與互動頁課件引用（建置時開關；不影響編輯態引用）
+NEXT_PUBLIC_COURSEWARE_REFERENCE_ENABLED=true
 
 # 職業教育任務引擎（伺服器端開關）
 OPENMAIC_ENABLE_VOCATIONAL=true
@@ -291,8 +297,10 @@ video:
 web-search:
   tavily:
     apiKey: tvly-...
+  exa:
+    apiKey: ...
   searxng:
     baseUrl: http://localhost:8080
 ```
 
-環境變數會逐欄位覆蓋 YAML 中的同名 provider 設定。鍵名必須使用程式碼中已註冊的 provider ID，例如 `openai`、`doubao-tts`、`openai-whisper`、`mineru`、`alidocmind`、`seedream`、`seedance`、`tavily` 或 `searxng`；未知 ID 不能在這裡註冊為自訂 LLM provider。
+環境變數會逐欄位覆蓋 YAML 中的同名 provider 設定。鍵名必須使用程式碼中已註冊的 provider ID，例如 `openai`、`doubao-tts`、`openai-whisper`、`mineru`、`alidocmind`、`seedream`、`seedance`、`exa`、`tavily` 或 `searxng`；未知 ID 不能在這裡註冊為自訂 LLM provider。

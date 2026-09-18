@@ -20,6 +20,7 @@ import type { AgentVoiceOverride } from '@/lib/audio/voice-resolver';
 import { isCustomTTSProvider, isCustomASRProvider } from '@/lib/audio/types';
 import {
   ASR_PROVIDERS,
+  CUSTOM_ASR_DEFAULT_LANGUAGES,
   DEFAULT_TTS_VOICES,
   isQwenCatalogVoice,
   isQwenVoiceCloneModel,
@@ -40,6 +41,7 @@ import {
   isLLMProviderConfigured,
 } from '@/lib/store/settings-validation';
 import { createKVPersistStorage, purgeLegacyPersistKey } from '@/lib/store/kv-persist';
+import { isTTSProviderEnabled } from '@/lib/audio/provider-enablement';
 
 const log = createLogger('Settings');
 
@@ -76,6 +78,28 @@ function pruneThinkingConfigs(
 /** Available playback speed tiers */
 export const PLAYBACK_SPEEDS = [1, 1.25, 1.5, 2] as const;
 export type PlaybackSpeed = (typeof PLAYBACK_SPEEDS)[number];
+
+/**
+ * Validate and resolve ASR language for a given provider.
+ * Keeps current language if supported by the provider, otherwise falls back
+ * to the provider's default supported language (or 'auto').
+ */
+export function getValidASRLanguage(providerId: ASRProviderId, currentLanguage?: string): string {
+  if (!providerId || typeof providerId !== 'string') return 'auto';
+  let supportedLanguages: readonly string[];
+  if (isCustomASRProvider(providerId)) {
+    supportedLanguages = CUSTOM_ASR_DEFAULT_LANGUAGES;
+  } else {
+    supportedLanguages =
+      ASR_PROVIDERS[providerId as keyof typeof ASR_PROVIDERS]?.supportedLanguages || [];
+  }
+  const isLanguageValid = Boolean(
+    typeof currentLanguage === 'string' &&
+    currentLanguage &&
+    supportedLanguages.includes(currentLanguage),
+  );
+  return isLanguageValid && currentLanguage ? currentLanguage : supportedLanguages[0] || 'auto';
+}
 
 export interface SettingsState {
   // Model selection
@@ -465,12 +489,29 @@ function resolveMediaModels<T extends { id: string; name: string }>(
     : [...builtInModels, ...customModels];
 }
 
+function hasMediaCredential(value: string | undefined): boolean {
+  return !!value && value.trim().length > 0;
+}
+
 function isUsableMediaProvider(
   provider: { requiresApiKey: boolean } | undefined,
-  config: { apiKey?: string; enabled?: boolean; isServerConfigured?: boolean } | undefined,
+  config:
+    | {
+        apiKey?: string;
+        baseUrl?: string;
+        enabled?: boolean;
+        isServerConfigured?: boolean;
+      }
+    | undefined,
 ): boolean {
   if (!provider || config?.enabled === false) return false;
-  return !provider.requiresApiKey || !!config?.apiKey || !!config?.isServerConfigured;
+  if (config?.isServerConfigured) return true;
+  if (provider.requiresApiKey) return hasMediaCredential(config?.apiKey);
+  return hasMediaCredential(config?.baseUrl);
+}
+
+function shouldTurnOn(currentlyEnabled: boolean, usable: boolean): boolean {
+  return !currentlyEnabled && usable;
 }
 
 // Initialize default audio config
@@ -479,7 +520,7 @@ const getDefaultAudioConfig = () => ({
   ttsVoice: 'default',
   ttsSpeed: 1.0,
   asrProviderId: 'browser-native' as ASRProviderId,
-  asrLanguage: 'zh',
+  asrLanguage: 'zh-CN',
   ttsProvidersConfig: {
     // Built-in providers default enabled:true — they only ever surface once
     // configured (API key or server-managed), so "enabled" is a user opt-OUT,
@@ -577,6 +618,12 @@ const getDefaultWebSearchConfig = () => ({
   webSearchProviderId: 'tavily' as WebSearchProviderId,
   webSearchProvidersConfig: {
     tavily: { apiKey: '', baseUrl: '', enabled: true, requiresApiKey: true },
+    exa: {
+      apiKey: '',
+      baseUrl: WEB_SEARCH_PROVIDERS.exa.defaultBaseUrl || '',
+      enabled: true,
+      requiresApiKey: true,
+    },
     bocha: { apiKey: '', baseUrl: '', enabled: true, requiresApiKey: true },
     brave: {
       apiKey: '',
@@ -631,7 +678,9 @@ const getDefaultWebSearchConfig = () => ({
  * Check whether a provider ID exists in the given provider registry.
  */
 function hasProviderId(providerMap: Record<string, unknown>, providerId?: string): boolean {
-  return typeof providerId === 'string' && providerId in providerMap;
+  return (
+    typeof providerId === 'string' && Object.prototype.hasOwnProperty.call(providerMap, providerId)
+  );
 }
 
 /**
@@ -669,7 +718,7 @@ function ensureValidProviderSelections(state: Partial<SettingsState>): void {
       state.ttsProviderId &&
       isCustomTTSProvider(state.ttsProviderId) &&
       state.ttsProvidersConfig &&
-      state.ttsProviderId in state.ttsProvidersConfig
+      Object.prototype.hasOwnProperty.call(state.ttsProvidersConfig, state.ttsProviderId)
     )
   ) {
     state.ttsProviderId = defaultAudioConfig.ttsProviderId;
@@ -681,10 +730,13 @@ function ensureValidProviderSelections(state: Partial<SettingsState>): void {
       state.asrProviderId &&
       isCustomASRProvider(state.asrProviderId) &&
       state.asrProvidersConfig &&
-      state.asrProviderId in state.asrProvidersConfig
+      Object.prototype.hasOwnProperty.call(state.asrProvidersConfig, state.asrProviderId)
     )
   ) {
     state.asrProviderId = defaultAudioConfig.asrProviderId;
+  }
+  if (state.asrProviderId) {
+    state.asrLanguage = getValidASRLanguage(state.asrProviderId, state.asrLanguage);
   }
 }
 
@@ -1085,31 +1137,22 @@ export const useSettingsStore = create<SettingsState>()(
         // Reset language when switching providers, since language code formats differ
         // (e.g. browser-native uses BCP-47 "en-US", OpenAI Whisper uses ISO 639-1 "en")
         setASRProvider: (providerId) =>
-          set((state) => {
-            let supportedLanguages: string[];
-            if (isCustomASRProvider(providerId)) {
-              supportedLanguages = ['auto'];
-            } else {
-              supportedLanguages =
-                ASR_PROVIDERS[providerId as keyof typeof ASR_PROVIDERS]?.supportedLanguages || [];
-            }
-            const isLanguageValid = supportedLanguages.includes(state.asrLanguage);
-            return {
-              asrProviderId: providerId,
-              ...(isLanguageValid ? {} : { asrLanguage: supportedLanguages[0] || 'auto' }),
-            };
-          }),
+          set((state) => ({
+            asrProviderId: providerId,
+            asrLanguage: getValidASRLanguage(providerId, state.asrLanguage),
+          })),
 
         setASRLanguage: (language) => set({ asrLanguage: language }),
 
         setTTSProviderConfig: (providerId, config) =>
           set((state) => {
+            const mergedProvider = {
+              ...state.ttsProvidersConfig[providerId],
+              ...config,
+            };
             const ttsProvidersConfig = {
               ...state.ttsProvidersConfig,
-              [providerId]: {
-                ...state.ttsProvidersConfig[providerId],
-                ...config,
-              },
+              [providerId]: mergedProvider,
             };
             // Disabling the active provider (e.g. removing a token plan) switches
             // the selection back to the always-available browser TTS so playback
@@ -1121,7 +1164,22 @@ export const useSettingsStore = create<SettingsState>()(
                 ttsVoice: 'default',
               };
             }
-            return { ttsProvidersConfig };
+            // Settings can configure a hosted provider after first-run auto-config
+            // has already run. The global flag has no control on that page, so
+            // becoming usable (empty -> key) must also turn narration on (#1288).
+            // Do not re-enable on later edits if the user turned the flag off.
+            const wasUsable = isTTSProviderEnabled(
+              providerId,
+              state.ttsProvidersConfig[providerId],
+            );
+            const nowUsable = isTTSProviderEnabled(providerId, mergedProvider);
+            const turnOnNarration =
+              providerId !== 'browser-native-tts' &&
+              shouldTurnOn(state.ttsEnabled, !wasUsable && nowUsable);
+            return {
+              ttsProvidersConfig,
+              ...(turnOnNarration ? { ttsEnabled: true } : {}),
+            };
           }),
 
         setASRProviderConfig: (providerId, config) =>
@@ -1173,7 +1231,20 @@ export const useSettingsStore = create<SettingsState>()(
               ...state.imageProvidersConfig,
               [providerId]: mergedProvider,
             };
-            const base = { imageProvidersConfig };
+            // Same usable-transition as TTS: empty -> usable turns the global
+            // flag on. A force-disabled provider (enabled: false) stays unused,
+            // and keyless providers (comfyui-image, lemonade) become usable
+            // from a baseUrl, not an API key.
+            const wasUsable = isUsableMediaProvider(
+              IMAGE_PROVIDERS[providerId],
+              state.imageProvidersConfig[providerId],
+            );
+            const nowUsable = isUsableMediaProvider(IMAGE_PROVIDERS[providerId], mergedProvider);
+            const turnOnImage = shouldTurnOn(state.imageGenerationEnabled, !wasUsable && nowUsable);
+            const base = {
+              imageProvidersConfig,
+              ...(turnOnImage ? { imageGenerationEnabled: true } : {}),
+            };
             if (state.imageProviderId === providerId) {
               // Disabling the active provider (e.g. removing a token plan) must
               // switch the selection away to the default, or generation paths
@@ -1237,7 +1308,16 @@ export const useSettingsStore = create<SettingsState>()(
               ...state.videoProvidersConfig,
               [providerId]: mergedProvider,
             };
-            const base = { videoProvidersConfig };
+            const wasUsable = isUsableMediaProvider(
+              VIDEO_PROVIDERS[providerId],
+              state.videoProvidersConfig[providerId],
+            );
+            const nowUsable = isUsableMediaProvider(VIDEO_PROVIDERS[providerId], mergedProvider);
+            const turnOnVideo = shouldTurnOn(state.videoGenerationEnabled, !wasUsable && nowUsable);
+            const base = {
+              videoProvidersConfig,
+              ...(turnOnVideo ? { videoGenerationEnabled: true } : {}),
+            };
             if (state.videoProviderId === providerId) {
               // Symmetric with image: disabling the active provider switches the
               // selection back to the default so nothing keeps pointing at a
@@ -1347,17 +1427,19 @@ export const useSettingsStore = create<SettingsState>()(
               },
             },
             asrProviderId: id,
+            asrLanguage: getValidASRLanguage(id, state.asrLanguage),
           })),
 
         removeCustomASRProvider: (id) =>
           set((state) => {
             if (!isCustomASRProvider(id)) return state;
             const { [id]: _, ...rest } = state.asrProvidersConfig;
+            const fallbackProvider: ASRProviderId = 'browser-native';
             return {
               asrProvidersConfig: rest as typeof state.asrProvidersConfig,
               ...(state.asrProviderId === id && {
-                asrProviderId: 'browser-native' as ASRProviderId,
-                asrLanguage: 'zh',
+                asrProviderId: fallbackProvider,
+                asrLanguage: getValidASRLanguage(fallbackProvider, state.asrLanguage),
               }),
             };
           }),
@@ -1481,7 +1563,7 @@ export const useSettingsStore = create<SettingsState>()(
                   };
                 }
               }
-              for (const [pid, info] of Object.entries(data.tts)) {
+              for (const [pid, info] of Object.entries(data.tts || {})) {
                 const key = pid as TTSProviderId;
                 if (newTTSConfig[key]) {
                   newTTSConfig[key] = {
@@ -1506,7 +1588,7 @@ export const useSettingsStore = create<SettingsState>()(
                   };
                 }
               }
-              for (const [pid, info] of Object.entries(data.asr)) {
+              for (const [pid, info] of Object.entries(data.asr || {})) {
                 const key = pid as ASRProviderId;
                 if (newASRConfig[key]) {
                   newASRConfig[key] = {
@@ -1737,6 +1819,10 @@ export const useSettingsStore = create<SettingsState>()(
                 validTTSProvider !== state.ttsProviderId
                   ? DEFAULT_TTS_VOICES[validTTSProvider as BuiltInTTSProviderId] || 'default'
                   : state.ttsVoice;
+              const validASRLanguage = getValidASRLanguage(
+                validASRProvider as ASRProviderId,
+                state.asrLanguage,
+              );
 
               // Auto-disable image/video generation when no provider is usable
               const shouldDisableImage = !validImageProvider && state.imageGenerationEnabled;
@@ -1746,6 +1832,7 @@ export const useSettingsStore = create<SettingsState>()(
               let autoTtsProvider: TTSProviderId | undefined;
               let autoTtsVoice: string | undefined;
               let autoAsrProvider: ASRProviderId | undefined;
+              let autoAsrLanguage: string | undefined;
               let autoPdfProvider: PDFProviderId | undefined;
               let autoImageProvider: ImageProviderId | undefined;
               let autoImageModel: string | undefined;
@@ -1767,7 +1854,7 @@ export const useSettingsStore = create<SettingsState>()(
 
                 // TTS: select first server provider if current is not server-configured.
                 // Skip server-disabled entries — they are force-off, not selectable.
-                const serverTtsIds = Object.entries(data.tts)
+                const serverTtsIds = Object.entries(data.tts || {})
                   .filter(([, info]) => !info.disabled)
                   .map(([id]) => id) as TTSProviderId[];
                 if (
@@ -1787,7 +1874,7 @@ export const useSettingsStore = create<SettingsState>()(
                 // ASR: select first server provider if current is not
                 // server-configured. Skip server-disabled entries — they are
                 // force-off, not selectable.
-                const serverAsrIds = Object.entries(data.asr)
+                const serverAsrIds = Object.entries(data.asr || {})
                   .filter(([, info]) => !info.disabled)
                   .map(([id]) => id) as ASRProviderId[];
                 if (
@@ -1795,6 +1882,7 @@ export const useSettingsStore = create<SettingsState>()(
                   !newASRConfig[state.asrProviderId]?.isServerConfigured
                 ) {
                   autoAsrProvider = serverAsrIds[0];
+                  autoAsrLanguage = getValidASRLanguage(autoAsrProvider, state.asrLanguage);
                 }
 
                 // Image: first server provider. Skip server-disabled entries —
@@ -1864,7 +1952,13 @@ export const useSettingsStore = create<SettingsState>()(
                 }),
                 ...(validASRProvider !== state.asrProviderId && {
                   asrProviderId: validASRProvider as ASRProviderId,
+                  asrLanguage: validASRLanguage,
                 }),
+                ...(validASRProvider === state.asrProviderId &&
+                  validASRLanguage !== state.asrLanguage &&
+                  !autoAsrProvider && {
+                    asrLanguage: validASRLanguage,
+                  }),
                 ...(validPDFProvider !== state.pdfProviderId && {
                   pdfProviderId: validPDFProvider as PDFProviderId,
                 }),
@@ -1893,7 +1987,10 @@ export const useSettingsStore = create<SettingsState>()(
                   ttsProviderId: autoTtsProvider,
                   ttsVoice: autoTtsVoice,
                 }),
-                ...(autoAsrProvider && { asrProviderId: autoAsrProvider }),
+                ...(autoAsrProvider && {
+                  asrProviderId: autoAsrProvider,
+                  asrLanguage: autoAsrLanguage,
+                }),
                 ...(autoImageProvider && {
                   imageProviderId: autoImageProvider,
                 }),
@@ -2075,6 +2172,12 @@ export const useSettingsStore = create<SettingsState>()(
               enabled: true,
               requiresApiKey: true,
               isServerConfigured: oldIsServerConfigured,
+            },
+            exa: {
+              apiKey: '',
+              baseUrl: WEB_SEARCH_PROVIDERS.exa.defaultBaseUrl || '',
+              enabled: true,
+              requiresApiKey: true,
             },
             bocha: {
               apiKey: '',
